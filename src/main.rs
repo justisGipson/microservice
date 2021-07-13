@@ -1,79 +1,49 @@
+// #![feature(proc_macro_hygiene)]
+
 extern crate hyper;
 extern crate futures;
+extern crate maud;
+extern crate url;
 
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+
+#[macro_use]
+extern crate serde_json;
+
 #[macro_use]
 extern crate serde_derive;
+
 #[macro_use]
 extern crate  diesel;
 
-mod schema;
-mod models;
-use models::{Message, NewMessage};
-use diesel::prelude::*;
-use diesel::pg::PgConnection;
+use std::collections::HashMap;
+use std::error::Error;
+use std::io;
+use std::env;
+
 use hyper::server::{Request, Response, Service};
 use hyper::{Chunk, StatusCode};
 use hyper::Method::{Get, Post};
+use hyper::header::{ContentLength, ContentType};
+
+use diesel::prelude::*;
+use diesel::pg::PgConnection;
+
 use futures::Stream;
 use futures::future::{Future, FutureResult};
-use std::collections::HashMap;
-use std::io;
-use std::env;
+
+use maud::html;
+
+mod schema;
+mod models;
+
+use models::{Message, NewMessage};
 
 const DEFAULT_DATABASE_URL: &str = "postgresql://postgresql@localhost:5432";
 
 struct Microservice;
-
-impl Service for Microservice {
-    type Request = Request;
-    type Response = Response;
-    type Error = hyper::Error;
-    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
-
-    fn call(&self, request: Request) -> Self::Future {
-        let db_connection = match connect_to_db() {
-            Some(connection) => connection;
-            None => {
-                return Box::new(futures::future::ok(
-                    Response::new().with_status(StatusCode::InternalServerError),
-                ))
-            }
-        };
-        match (request.method(), request.path()) {
-            (&Post, "/") => {
-                let future = request
-                    .body()
-                    .concat2()
-                    .and_then(parse_form)
-                    .and_then(write_to_db)
-                    .then(make_post_response);
-                Box::new(future)
-            }
-            (&Get, "/") => {
-                let time_range = match request.query() {
-                    Some(query) => parse_query(query),
-                    None => Ok(TimeRange {
-                        before: None,
-                        after: None,
-                    }),
-                };
-                let response = match time_range {
-                    Ok(time_range) => make_get_response(query_db(time_range)),
-                    Err(error) => {
-                        make_error_response(&error)
-                    },
-                };
-                Box::new(response)
-            }
-            _ => Box::new(futures::future::ok(
-                Response::new().with_status(StatusCode::NotFound),
-            )),
-        }
-    }
-}
 
 struct TimeRange {
     before: Option<i64>,
@@ -203,4 +173,52 @@ fn main() {
         .unwrap();
     info!("Running microservice @ {}", address);
     server.run().unwrap();
+}
+
+impl Service for Microservice {
+    type Request = Request;
+    type Response = Response;
+    type Error = hyper::Error;
+    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
+
+    fn call(&self, request: Request) -> Self::Future {
+        let db_connection = match connect_to_db() {
+            Some(connection) => connection;
+            None => {
+                return Box::new(futures::future::ok(
+                    Response::new().with_status(StatusCode::InternalServerError),
+                ))
+            }
+        };
+        match (request.method(), request.path()) {
+            (&Post, "/") => {
+                let future = request
+                    .body()
+                    .concat2()
+                    .and_then(parse_form)
+                    .and_then(write_to_db)
+                    .then(make_post_response);
+                Box::new(future)
+            }
+            (&Get, "/") => {
+                let time_range = match request.query() {
+                    Some(query) => parse_query(query),
+                    None => Ok(TimeRange {
+                        before: None,
+                        after: None,
+                    }),
+                };
+                let response = match time_range {
+                    Ok(time_range) => make_get_response(query_db(time_range)),
+                    Err(error) => {
+                        make_error_response(&error)
+                    },
+                };
+                Box::new(response)
+            }
+            _ => Box::new(futures::future::ok(
+                Response::new().with_status(StatusCode::NotFound),
+            )),
+        }
+    }
 }
