@@ -10,8 +10,7 @@ pub struct Message {
 
 #[derive(Insertable, Debug)]
 #[table_name = "messages"]
-
-struct NewMessage {
-  username: String,
-  message: String,
+pub struct NewMessage {
+  pub username: String,
+  pub message: String,
 }

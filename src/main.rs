@@ -21,6 +21,9 @@ use futures::Stream;
 use futures::future::{Future, FutureResult};
 use std::collections::HashMap;
 use std::io;
+use std::env;
+
+const DEFAULT_DATABASE_URL: &str = "postgresql://postgresql@localhost:5432";
 
 struct Microservice;
 
@@ -31,6 +34,14 @@ impl Service for Microservice {
     type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
 
     fn call(&self, request: Request) -> Self::Future {
+        let db_connection = match connect_to_db() {
+            Some(connection) => connection;
+            None => {
+                return Box::new(futures::future::ok(
+                    Response::new().with_status(StatusCode::InternalServerError),
+                ))
+            }
+        };
         match (request.method(), request.path()) {
             (&Post, "/") => {
                 let future = request
@@ -171,6 +182,17 @@ fn make_error_response(error_message: &str) -> FutureResult<hyper::Response, hyp
         .with_body(payload);
     debug!("{:?}", response);
     futures::future::ok(response)
+}
+
+fn connect_to_db() ->  Option<PgConnection> {
+    let database_url = env::var("DATABASE_URL").unwrap_or(String::from(DEFAULT_DATABASE_URL));
+    match PgConnection::establish(&database_url) {
+        Ok(connection) => Some(connection),
+        Err(error) => {
+            error!("Error connecting to database: {}", error.description());
+            None
+        }
+    }
 }
 
 fn main() {
