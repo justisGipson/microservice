@@ -1,6 +1,6 @@
 use schema::messages;
 
-#[#[derive(Queryable, Serialize, Debug)]]
+#[derive(Queryable, Serialize, Debug)]
 pub struct Message {
   pub id: i32,
   pub username: String,

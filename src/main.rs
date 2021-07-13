@@ -11,7 +11,7 @@ extern crate  diesel;
 
 mod schema;
 mod models;
-
+use models::{Message, NewMessage};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use hyper::server::{Request, Response, Service};
