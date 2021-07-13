@@ -9,6 +9,11 @@ extern crate serde_derive;
 #[macro_use]
 extern crate  diesel;
 
+mod schema;
+mod models;
+
+use diesel::prelude::*;
+use diesel::pg::PgConnection;
 use hyper::server::{Request, Response, Service};
 use hyper::{Chunk, StatusCode};
 use hyper::Method::{Get, Post};
@@ -59,11 +64,6 @@ impl Service for Microservice {
     }
 }
 
-struct NewMessage {
-    username: String,
-    message: String,
-}
-
 struct TimeRange {
     before: Option<i64>,
     after: Option<i64>,
@@ -111,9 +111,24 @@ fn parse_query(query: &str) -> Result<TimeRange, String> {
     })
 }
 
-fn write_to_db(entry: NewMessage) -> FutureResult<i64, hyper::Error> {
-    futures::future::ok(0)
+fn write_to_db(new_message: NewMessage, db_connection: &PgConnection) -> FutureResult<i64, hyper::Error> {
+    use schema::messages;
+    let timestamp = diesel::insert_into(messages::table)
+        .values(&new_message)
+        .returning(messages::timestamp)
+        .get_result(db_connection);
+
+    match timestamp {
+        Ok(timestamp) => futures::future::ok(timestamp),
+        Err(error) => {
+            error!("Error writing to database: {}", error.description());
+            futures::future::err(hyper::Error::from(
+                io::Error::new(io::ErrorKind::Other, "service error"),
+            ))
+        }
+    }
 }
+
 #[macro_use]
 extern crate serde_json;
 fn make_post_response(result: Result<i64, hyper::Error>) -> FutureResult<hyper::Response, hyper::Error> {
