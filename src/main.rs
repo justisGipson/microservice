@@ -1,4 +1,4 @@
-// #![feature(proc_macro_hygiene)]
+#![feature(proc_macro_hygiene)]
 
 extern crate hyper;
 extern crate futures;
@@ -19,7 +19,7 @@ extern crate serde_derive;
 extern crate  diesel;
 
 use std::collections::HashMap;
-use std::error::Error;
+// use std::error::Error;
 use std::io;
 use std::env;
 
@@ -110,8 +110,6 @@ fn write_to_db(new_message: NewMessage, db_connection: &PgConnection) -> FutureR
     }
 }
 
-#[macro_use]
-extern crate serde_json;
 fn make_post_response(result: Result<i64, hyper::Error>) -> FutureResult<hyper::Response, hyper::Error> {
     match result {
         Ok(timestamp) => {
@@ -124,7 +122,7 @@ fn make_post_response(result: Result<i64, hyper::Error>) -> FutureResult<hyper::
             futures::future::ok(response)
         }
         Err(error) => {
-            make_error_response(error.description())
+            make_error_response(&error.to_string())
         }
     }
 }
@@ -159,7 +157,38 @@ fn connect_to_db() ->  Option<PgConnection> {
     match PgConnection::establish(&database_url) {
         Ok(connection) => Some(connection),
         Err(error) => {
-            error!("Error connecting to database: {}", error.description());
+            error!("Error connecting to database: {}", error.to_string());
+            None
+        }
+    }
+}
+
+fn query_db(time_range: TimeRange, db_connection: &PgConnection) -> Option<Vec<Message>> {
+    use schema::messages;
+    let TimeRange { before, after } = time_range;
+    let query_result = match (before, after) {
+        (Some(before), Some(after)) => {
+            messages::table
+                .filter(messages::timestamp.lt(before as i64))
+                .filter(messages::timestamp.gt(after as i64))
+                .load::<Message>(db_connection)
+        }
+        (Some(before), _) => {
+            messages::table
+                .filter(messages::timestamp.lt(before as i64))
+                .load::<Message>(db_connection)
+        }
+        (_, Some(after)) => {
+            messages::table
+                .filter(messages::timestamp.gt(after as i64))
+                .load::<Message>(db_connection)
+        }
+        _ => messages::table.load::<Message>(db_connection),
+    };
+    match query_result {
+        Ok(result) => Some(result),
+        Err(error) => {
+            error!("Error querying DB: {}", error);
             None
         }
     }
@@ -175,6 +204,26 @@ fn main() {
     server.run().unwrap();
 }
 
+fn render_page(messages: Vec<Message>) -> String {
+    // rust macros to render html???
+    // neat
+    (html! {
+        head {
+            title { "microservice" }
+            style { "body { font-family: monospace }" }
+        }
+        body {
+            ul {
+                @for message in &messages {
+                    li {
+                        (message.username) " (" (message.timestamp) "): " (message.message)
+                    }
+                }
+            }
+        }
+    }).into_string()
+}
+
 impl Service for Microservice {
     type Request = Request;
     type Response = Response;
@@ -183,7 +232,7 @@ impl Service for Microservice {
 
     fn call(&self, request: Request) -> Self::Future {
         let db_connection = match connect_to_db() {
-            Some(connection) => connection;
+            Some(connection) => { connection }
             None => {
                 return Box::new(futures::future::ok(
                     Response::new().with_status(StatusCode::InternalServerError),
@@ -196,7 +245,7 @@ impl Service for Microservice {
                     .body()
                     .concat2()
                     .and_then(parse_form)
-                    .and_then(write_to_db)
+                    .and_then(move |new_messaage| write_to_db(new_messaage, &db_connection))
                     .then(make_post_response);
                 Box::new(future)
             }
@@ -209,7 +258,7 @@ impl Service for Microservice {
                     }),
                 };
                 let response = match time_range {
-                    Ok(time_range) => make_get_response(query_db(time_range)),
+                    Ok(time_range) => make_get_response(query_db(time_range, &db_connection)),
                     Err(error) => {
                         make_error_response(&error)
                     },

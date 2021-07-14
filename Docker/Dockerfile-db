@@ -1,0 +1,4 @@
+FROM postgres
+
+# create table on start
+ASS schems/messages.sql /docker-entrypoint-initdb.d/
